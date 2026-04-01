@@ -18,19 +18,19 @@ function initSensorListener(io, SensorData, options = {}) {
   let lastSaveTime = Date.now();
 
   // Read every line of serial data
-  parser.on('data', (rawLine) => {
-    const [h, t] = rawLine.split(',').map(Number);
+  parser.on('data', (rawData) => {
+    const parseData = JSON.parse(rawData);
+    
+    const { h, t, fan_status, sensor } = parseData;
 
     if (!isNaN(h) && !isNaN(t)) {
-      const payload = { h, t, timestamp: new Date() };
+      const payload = { h, t, timestamp: new Date(), fan_status };
 
       // Broadcast instantly via Socket.IO with renamed event
       io.emit('temperature-humidity', payload);
 
       // Buffer for minute-average persistence
-      dataBuffer.push({ h, t });
-
-      console.log('Data received from sensor: ', payload);
+      dataBuffer.push({ h, t, sensor });
 
       if (Date.now() - lastSaveTime >= saveIntervalMs) {
         saveAverageToDB();
@@ -44,11 +44,15 @@ function initSensorListener(io, SensorData, options = {}) {
     const avgH = (dataBuffer.reduce((a, b) => a + b.h, 0) / dataBuffer.length).toFixed(2);
     const avgT = (dataBuffer.reduce((a, b) => a + b.t, 0) / dataBuffer.length).toFixed(2);
 
+    const latestSensor =
+      [...dataBuffer].reverse().find((item) => typeof item.sensor === 'string' && item.sensor.trim())?.sensor
+      || sensorConfig.sensorId;
+
     try {
       await new SensorData({
         humidity: parseFloat(avgH),
         temperature: parseFloat(avgT),
-        metadata: { sensorId: sensorConfig.sensorId, samples: dataBuffer.length },
+        metadata: { sensorId: latestSensor, samples: dataBuffer.length },
       }).save();
 
       console.log(`[DB] Saved 5-min average: ${avgT}°C`);

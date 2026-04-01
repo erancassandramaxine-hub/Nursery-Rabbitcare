@@ -1,9 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 
-const metricsRouter = require('./routes/metrics');
-const authRouter = require('./routes/auth');
-const { authRequired, adminOnly } = require('./middleware/auth');
+const registerRoutes = require('./routes');
 
 function createApp() {
   const app = express();
@@ -17,11 +15,8 @@ function createApp() {
     res.json({ status: 'ok' });
   });
 
-  // Auth routes
-  app.use('/api/auth', authRouter);
-
-  // Protected API routes (admin-only)
-  app.use('/api/metrics', authRequired, adminOnly, metricsRouter);
+  // API routes
+  registerRoutes(app);
 
   return app;
 }

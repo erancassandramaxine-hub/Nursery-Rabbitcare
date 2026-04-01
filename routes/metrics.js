@@ -10,9 +10,16 @@ const router = express.Router();
 //   limit: max number of records (default 100, max 1000)
 //   from: ISO date string for start timestamp (inclusive)
 //   to: ISO date string for end timestamp (inclusive)
+//   interval: bucket size for aggregated chart data (5m | 30m | 1h)
 router.get('/temperature-humidity', async (req, res) => {
   try {
-    const { limit = 100, from, to } = req.query;
+    const { limit = 100, from, to, interval } = req.query;
+    const validIntervals = { '5m': 5 * 60 * 1000, '30m': 30 * 60 * 1000, '1h': 60 * 60 * 1000 };
+    const intervalMs = interval ? validIntervals[String(interval)] : null;
+
+    if (interval && !intervalMs) {
+      return res.status(400).json({ error: 'Invalid interval. Use 5m, 30m, or 1h' });
+    }
 
     const query = {};
 
@@ -70,7 +77,68 @@ router.get('/temperature-humidity', async (req, res) => {
       };
     });
 
-    res.json(formatted);
+    if (!intervalMs) {
+      return res.json(formatted);
+    }
+
+    // Bucket readings by selected interval and average values per bucket.
+    const buckets = new Map();
+    for (const row of formatted) {
+      if (!row.timestamp) continue;
+
+      const ts = new Date(row.timestamp).getTime();
+      if (Number.isNaN(ts)) continue;
+
+      const bucketStartMs = Math.floor(ts / intervalMs) * intervalMs;
+      const key = String(bucketStartMs);
+
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          timestampMs: bucketStartMs,
+          humiditySum: 0,
+          humidityCount: 0,
+          temperatureSum: 0,
+          temperatureCount: 0,
+        });
+      }
+
+      const bucket = buckets.get(key);
+
+      if (typeof row.humidity === 'number') {
+        bucket.humiditySum += row.humidity;
+        bucket.humidityCount += 1;
+      }
+
+      if (typeof row.temperature === 'number') {
+        bucket.temperatureSum += row.temperature;
+        bucket.temperatureCount += 1;
+      }
+    }
+
+    const aggregated = Array.from(buckets.values())
+      .sort((a, b) => a.timestampMs - b.timestampMs)
+      .map((bucket) => {
+        const ts = new Date(bucket.timestampMs);
+
+        return {
+          id: String(bucket.timestampMs),
+          humidity: bucket.humidityCount ? bucket.humiditySum / bucket.humidityCount : null,
+          temperature: bucket.temperatureCount ? bucket.temperatureSum / bucket.temperatureCount : null,
+          timestamp: ts.toISOString(),
+          timestampLabel: ts.toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true,
+          }),
+          interval: String(interval),
+        };
+      });
+
+    return res.json(aggregated);
   } catch (err) {
     console.error('Error fetching sensor data:', err);
     res.status(500).json({ error: 'Failed to fetch sensor data' });
