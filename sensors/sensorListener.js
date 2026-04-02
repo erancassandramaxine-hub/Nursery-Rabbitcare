@@ -3,6 +3,19 @@ const { ReadlineParser } = require('@serialport/parser-readline');
 const sensorConfig = require('../config/sensorConfig');
 
 function initSensorListener(io, SensorData, options = {}) {
+  const emitSensorStatus = (connected, reason = null) => {
+    io.emit('sensor-status', {
+      connected,
+      reason,
+      timestamp: new Date(),
+    });
+  };
+
+  if (!sensorConfig.isControllerConnected) {
+    emitSensorStatus(false, 'controller-not-connected');
+    return { close: () => {} };
+  }
+
   const {
     port = sensorConfig.port,
     baudRate = sensorConfig.baudRate,
@@ -13,14 +26,33 @@ function initSensorListener(io, SensorData, options = {}) {
   const arduinoSerial = new SerialPort({ path: port, baudRate });
   const parser = arduinoSerial.pipe(new ReadlineParser({ delimiter: '\r\n' }));
 
+  arduinoSerial.on('open', () => {
+    emitSensorStatus(true);
+  });
+
+  arduinoSerial.on('close', () => {
+    emitSensorStatus(false, 'serial-port-closed');
+  });
+
+  arduinoSerial.on('error', (err) => {
+    console.error('Serial port error:', err);
+    emitSensorStatus(false, err?.message || 'serial-port-error');
+  });
+
   // Buffer and timing for DB writes
   let dataBuffer = [];
   let lastSaveTime = Date.now();
 
   // Read every line of serial data
   parser.on('data', (rawData) => {
-    const parseData = JSON.parse(rawData);
-    
+    let parseData;
+    try {
+      parseData = JSON.parse(rawData);
+    } catch (e) {
+      console.warn('Invalid JSON from sensor:', rawData);
+      return;
+    }
+
     const { h, t, fan_status, sensor } = parseData;
 
     if (!isNaN(h) && !isNaN(t)) {
@@ -28,6 +60,7 @@ function initSensorListener(io, SensorData, options = {}) {
 
       // Broadcast instantly via Socket.IO with renamed event
       io.emit('temperature-humidity', payload);
+      emitSensorStatus(true);
 
       // Buffer for minute-average persistence
       dataBuffer.push({ h, t, sensor });

@@ -8,8 +8,8 @@ const router = express.Router();
 // Default: last 24 hours
 // Optional query params:
 //   limit: max number of records (default 100, max 1000)
-//   from: ISO date string for start timestamp (inclusive)
-//   to: ISO date string for end timestamp (inclusive)
+//   from: Unix timestamp (seconds/ms) for start timestamp (inclusive)
+//   to: Unix timestamp (seconds/ms) for end timestamp (inclusive)
 //   interval: bucket size for aggregated chart data (5m | 30m | 1h)
 router.get('/temperature-humidity', async (req, res) => {
   try {
@@ -25,15 +25,29 @@ router.get('/temperature-humidity', async (req, res) => {
 
     let fromDate;
     let toDate;
+    const parseTimestamp = (value) => {
+      if (value === undefined || value === null || value === '') return null;
 
-    if (from) {
-      const d = new Date(from);
-      if (!isNaN(d.getTime())) fromDate = d;
-    }
+      // Accept Unix timestamp in seconds or milliseconds.
+      const numeric = Number(value);
+      if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
+        const ms = numeric < 1e12 ? numeric * 1000 : numeric;
+        const d = new Date(ms);
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
 
-    if (to) {
-      const d = new Date(to);
-      if (!isNaN(d.getTime())) toDate = d;
+      // Backward compatibility for ISO date strings.
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    fromDate = parseTimestamp(from);
+    toDate = parseTimestamp(to);
+
+    if ((from && !fromDate) || (to && !toDate)) {
+      return res.status(400).json({
+        error: 'Invalid from/to. Use Unix timestamp in seconds or milliseconds',
+      });
     }
 
     // Default to last 24 hours if no valid range provided
