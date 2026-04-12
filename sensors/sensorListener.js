@@ -53,10 +53,16 @@ function initSensorListener(io, SensorData, options = {}) {
       return;
     }
 
-    const { h, t, fan_status, sensor } = parseData;
+    const { h, t, fan_status, sensor, heater_status } = parseData;
 
     if (!isNaN(h) && !isNaN(t)) {
-      const payload = { h, t, timestamp: new Date(), fan_status };
+      const payload = { 
+        h, 
+        t, 
+        timestamp: new Date(), 
+        fan_status,
+        heater_status,
+      };
 
       // Broadcast instantly via Socket.IO with renamed event
       io.emit('temperature-humidity', payload);
