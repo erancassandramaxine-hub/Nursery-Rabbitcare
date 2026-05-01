@@ -18,6 +18,21 @@ const sensorSchema = new mongoose.Schema({
 
 const SensorData = mongoose.model('SensorData', sensorSchema);
 
+const weightMotionSchema = new mongoose.Schema({
+  timestamp: { type: Date, default: Date.now },
+  metadata: { sensorId: String },
+  weight: Number,
+  motion: Number,
+}, {
+  timeseries: {
+    timeField: 'timestamp',
+    metaField: 'metadata',
+    granularity: 'seconds',
+  },
+});
+
+const WeightMotionData = mongoose.model('WeightMotionData', weightMotionSchema);
+
 // Admin user schema
 const adminSchema = new mongoose.Schema({
   email: { type: String, unique: true, required: true },
@@ -56,4 +71,4 @@ const ensureAdminUser = async () => {
   console.log(`Default admin user created for email: ${email}`);
 };
 
-module.exports = { connectDB, SensorData, AdminUser, ensureAdminUser };
+module.exports = { connectDB, SensorData, WeightMotionData, AdminUser, ensureAdminUser };

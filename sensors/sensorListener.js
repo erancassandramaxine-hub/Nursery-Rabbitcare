@@ -2,7 +2,7 @@ const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 const sensorConfig = require('../config/sensorConfig');
 
-function initSensorListener(io, SensorData, options = {}) {
+function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
   const emitSensorStatus = (connected, reason = null) => {
     io.emit('sensor-status', {
       connected,
@@ -20,6 +20,9 @@ function initSensorListener(io, SensorData, options = {}) {
     port = sensorConfig.port,
     baudRate = sensorConfig.baudRate,
     saveIntervalMs = sensorConfig.saveIntervalMs,
+    conditionalSaveIntervalMs = sensorConfig.conditionalSaveIntervalMs,
+    weightThresholdGrams = sensorConfig.weightThresholdGrams,
+    motionZeroToleranceCount = sensorConfig.motionZeroToleranceCount,
   } = options;
 
   // Serial setup
@@ -42,6 +45,8 @@ function initSensorListener(io, SensorData, options = {}) {
   // Buffer and timing for DB writes
   let dataBuffer = [];
   let lastSaveTime = Date.now();
+  let lastConditionalSaveTime = null;
+  let consecutiveZeroMotionCount = 0;
 
   // Read every line of serial data
   parser.on('data', (rawData) => {
@@ -53,7 +58,22 @@ function initSensorListener(io, SensorData, options = {}) {
       return;
     }
 
-    const { h, t, fan_status, sensor, heater_status } = parseData;
+    const { h, t, fan_status, sensor, heater_status, w, m } = parseData;
+    const weight = Number(w);
+    const motion = Number(m);
+    const emittedWeight = !Number.isNaN(weight) && weight <= weightThresholdGrams ? 0 : w;
+    const possibleVisit = getRealtimePossibleVisit(weight, motion);
+
+    handleConditionalWeightMotionSave({ w, m, sensor });
+
+    // Always emit visit state for real-time FE indicators.
+    io.emit('possible-visit', {
+      possibleVisit,
+      w: emittedWeight,
+      m,
+      threshold: weightThresholdGrams,
+      timestamp: new Date(),
+    });
 
     if (!isNaN(h) && !isNaN(t)) {
       const payload = { 
@@ -62,6 +82,9 @@ function initSensorListener(io, SensorData, options = {}) {
         timestamp: new Date(), 
         fan_status,
         heater_status,
+        w: emittedWeight,
+        m,
+        possibleVisit,
       };
 
       // Broadcast instantly via Socket.IO with renamed event
@@ -100,6 +123,80 @@ function initSensorListener(io, SensorData, options = {}) {
     } catch (e) {
       console.error(e);
     }
+  }
+
+  async function handleConditionalWeightMotionSave({ w, m, sensor }) {
+    if (!WeightMotionData) return;
+
+    const weight = Number(w);
+    const motion = Number(m);
+    const now = Date.now();
+    const isWeightPassed = !Number.isNaN(weight) && weight >= weightThresholdGrams;
+    const isMotionValid = !Number.isNaN(motion) && (motion === 0 || motion === 1);
+
+    if (!isWeightPassed || !isMotionValid) {
+      lastConditionalSaveTime = null;
+      consecutiveZeroMotionCount = 0;
+      return;
+    }
+
+    // Start cycle only when motion is detected.
+    if (lastConditionalSaveTime === null) {
+      if (motion !== 1) return;
+
+      lastConditionalSaveTime = now;
+      consecutiveZeroMotionCount = 0;
+      console.log(
+        `[DB] Condition met, starting weight/motion save cycle (every ${conditionalSaveIntervalMs}ms): ${weight}g, motion=${motion}`
+      );
+      return;
+    }
+
+    // While cycle is active, tolerate brief motion drops (m=0).
+    if (motion === 1) {
+      consecutiveZeroMotionCount = 0;
+    } else {
+      consecutiveZeroMotionCount += 1;
+      if (consecutiveZeroMotionCount > motionZeroToleranceCount) {
+        console.log(
+          `[DB] Stopping weight/motion save cycle: motion stayed 0 beyond tolerance (${motionZeroToleranceCount})`
+        );
+        lastConditionalSaveTime = null;
+        consecutiveZeroMotionCount = 0;
+        return;
+      }
+    }
+
+    if (now - lastConditionalSaveTime < conditionalSaveIntervalMs) return;
+
+    try {
+      const latestSensor = (typeof sensor === 'string' && sensor.trim())
+        ? sensor
+        : sensorConfig.sensorId;
+
+      await new WeightMotionData({
+        weight,
+        motion,
+        metadata: { sensorId: latestSensor },
+      }).save();
+
+      lastConditionalSaveTime = now;
+      console.log(`[DB] Saved weight/motion snapshot: ${weight}g, motion=${motion}`);
+    } catch (e) {
+      console.error('Failed to save weight/motion snapshot:', e);
+    }
+  }
+
+  function getRealtimePossibleVisit(weight, motion) {
+    const isWeightPassed = !Number.isNaN(weight) && weight >= weightThresholdGrams;
+    const isMotionValid = !Number.isNaN(motion) && (motion === 0 || motion === 1);
+
+    if (!isWeightPassed || !isMotionValid) return false;
+    if (motion === 1) return true;
+    if (lastConditionalSaveTime === null) return false;
+
+    // Predict the next zero-motion count to match tolerance behavior in save logic.
+    return (consecutiveZeroMotionCount + 1) <= motionZeroToleranceCount;
   }
 
   return {

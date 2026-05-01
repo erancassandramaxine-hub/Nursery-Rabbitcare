@@ -1,6 +1,6 @@
 const http = require('http');
 const { Server } = require('socket.io');
-const { connectDB, SensorData, ensureAdminUser } = require('./database');
+const { connectDB, SensorData, WeightMotionData, ensureAdminUser } = require('./database');
 const createApp = require('./app');
 const { initSensorListener } = require('./sensors/sensorListener');
 
@@ -24,7 +24,7 @@ async function startServer() {
   });
 
   // Initialize sensor listener (serial port + buffering + DB writes)
-  initSensorListener(io, SensorData);
+  initSensorListener(io, SensorData, WeightMotionData);
 
   // Start HTTP server
   const PORT = process.env.PORT || 4000;
