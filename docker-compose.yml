@@ -1,0 +1,41 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-4000}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/arduino_iot}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SENSOR_PORT: ${SENSOR_PORT:-/dev/ttyUSB0}
+      SENSOR_BAUD_RATE: ${SENSOR_BAUD_RATE:-9600}
+      SENSOR_SAVE_INTERVAL_MS: ${SENSOR_SAVE_INTERVAL_MS:-60000}
+      SENSOR_ID: ${SENSOR_ID:-DHT11_01}
+      IS_CONTROLLER_CONNECTED: ${IS_CONTROLLER_CONNECTED:-}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # Serial hardware (Linux host): set IS_CONTROLLER_CONNECTED=1 and uncomment:
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+
+volumes:
+  mongo_data:
