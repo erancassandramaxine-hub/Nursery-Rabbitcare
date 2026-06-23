@@ -24,11 +24,11 @@ async function startServer() {
   });
 
   // Initialize sensor listener (serial port + buffering + DB writes)
-  initSensorListener(io, SensorData, WeightMotionData);
+  // initSensorListener(io, SensorData, WeightMotionData);
 
   // Start HTTP server
   const PORT = process.env.PORT || 4000;
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
   });
 }

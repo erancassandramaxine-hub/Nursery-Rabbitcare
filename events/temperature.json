@@ -1,0 +1,18 @@
+{
+  "event": "sensor-data",
+  "direction": "client → server",
+  "description": "Real-time temperature and humidity reading emitted by the Arduino over WebSocket",
+  "schema": {
+    "type": "object",
+    "required": ["temperature", "humidity"],
+    "properties": {
+      "temperature": { "type": "number", "description": "Temperature in Celsius" },
+      "humidity": { "type": "number", "description": "Humidity percentage (0–100)" }
+    },
+    "additionalProperties": false
+  },
+  "example": {
+    "temperature": 24.5,
+    "humidity": 62.3
+  }
+}
