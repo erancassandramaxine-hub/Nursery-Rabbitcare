@@ -1,12 +1,13 @@
 const express = require('express');
 const { SensorData } = require('../database');
 const sensorConfig = require('../config/sensorConfig');
+const { sensorApiKeyRequired } = require('../middleware/auth');
 
 const router = express.Router();
 
 // POST /api/data/temperature-humidity
 // Body: { "temperature": number, "humidity": number }  (see events/temperature.json)
-router.post('/temperature-humidity', async (req, res) => {
+router.post('/temperature-humidity', sensorApiKeyRequired, async (req, res) => {
   const { temperature, humidity } = req.body;
 
   if (typeof temperature !== 'number' || typeof humidity !== 'number') {

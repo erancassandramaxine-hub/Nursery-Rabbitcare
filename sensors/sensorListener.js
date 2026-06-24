@@ -2,17 +2,8 @@ const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 const sensorConfig = require('../config/sensorConfig');
 
-function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
-  const emitSensorStatus = (connected, reason = null) => {
-    io.emit('sensor-status', {
-      connected,
-      reason,
-      timestamp: new Date(),
-    });
-  };
-
+function initSensorListener(SensorData, WeightMotionData, options = {}) {
   if (!sensorConfig.isControllerConnected) {
-    emitSensorStatus(false, 'controller-not-connected');
     return { close: () => {} };
   }
 
@@ -25,30 +16,18 @@ function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
     motionZeroToleranceCount = sensorConfig.motionZeroToleranceCount,
   } = options;
 
-  // Serial setup
   const arduinoSerial = new SerialPort({ path: port, baudRate });
   const parser = arduinoSerial.pipe(new ReadlineParser({ delimiter: '\r\n' }));
 
-  arduinoSerial.on('open', () => {
-    emitSensorStatus(true);
-  });
-
-  arduinoSerial.on('close', () => {
-    emitSensorStatus(false, 'serial-port-closed');
-  });
-
   arduinoSerial.on('error', (err) => {
     console.error('Serial port error:', err);
-    emitSensorStatus(false, err?.message || 'serial-port-error');
   });
 
-  // Buffer and timing for DB writes
   let dataBuffer = [];
   let lastSaveTime = Date.now();
   let lastConditionalSaveTime = null;
   let consecutiveZeroMotionCount = 0;
 
-  // Read every line of serial data
   parser.on('data', (rawData) => {
     let parseData;
     try {
@@ -58,40 +37,11 @@ function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
       return;
     }
 
-    const { h, t, fan_status, sensor, heater_status, w, m } = parseData;
-    const weight = Number(w);
-    const motion = Number(m);
-    const emittedWeight = !Number.isNaN(weight) && weight <= weightThresholdGrams ? 0 : w;
-    const possibleVisit = getRealtimePossibleVisit(weight, motion);
+    const { h, t, w, m, sensor } = parseData;
 
     handleConditionalWeightMotionSave({ w, m, sensor });
 
-    // Always emit visit state for real-time FE indicators.
-    io.emit('possible-visit', {
-      possibleVisit,
-      w: emittedWeight,
-      m,
-      threshold: weightThresholdGrams,
-      timestamp: new Date(),
-    });
-
     if (!isNaN(h) && !isNaN(t)) {
-      const payload = { 
-        h, 
-        t, 
-        timestamp: new Date(), 
-        fan_status,
-        heater_status,
-        w: emittedWeight,
-        m,
-        possibleVisit,
-      };
-
-      // Broadcast instantly via Socket.IO with renamed event
-      io.emit('temperature-humidity', payload);
-      emitSensorStatus(true);
-
-      // Buffer for minute-average persistence
       dataBuffer.push({ h, t, sensor });
 
       if (Date.now() - lastSaveTime >= saveIntervalMs) {
@@ -140,7 +90,6 @@ function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
       return;
     }
 
-    // Start cycle only when motion is detected.
     if (lastConditionalSaveTime === null) {
       if (motion !== 1) return;
 
@@ -152,7 +101,6 @@ function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
       return;
     }
 
-    // While cycle is active, tolerate brief motion drops (m=0).
     if (motion === 1) {
       consecutiveZeroMotionCount = 0;
     } else {
@@ -187,18 +135,6 @@ function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
     }
   }
 
-  function getRealtimePossibleVisit(weight, motion) {
-    const isWeightPassed = !Number.isNaN(weight) && weight >= weightThresholdGrams;
-    const isMotionValid = !Number.isNaN(motion) && (motion === 0 || motion === 1);
-
-    if (!isWeightPassed || !isMotionValid) return false;
-    if (motion === 1) return true;
-    if (lastConditionalSaveTime === null) return false;
-
-    // Predict the next zero-motion count to match tolerance behavior in save logic.
-    return (consecutiveZeroMotionCount + 1) <= motionZeroToleranceCount;
-  }
-
   return {
     close: () => {
       try {
@@ -211,4 +147,3 @@ function initSensorListener(io, SensorData, WeightMotionData, options = {}) {
 }
 
 module.exports = { initSensorListener };
-

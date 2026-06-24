@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const SENSOR_API_KEY = process.env.SENSOR_API_KEY;
 
 function authRequired(req, res, next) {
   const authHeader = req.headers.authorization || '';
@@ -26,5 +27,19 @@ function adminOnly(req, res, next) {
   next();
 }
 
-module.exports = { authRequired, adminOnly, JWT_SECRET };
+function sensorApiKeyRequired(req, res, next) {
+  if (!SENSOR_API_KEY) {
+    console.warn('SENSOR_API_KEY is not set; sensor endpoint is unprotected');
+    return next();
+  }
+
+  const key = req.headers['x-api-key'];
+  if (!key || key !== SENSOR_API_KEY) {
+    return res.status(401).json({ error: 'Invalid or missing API key' });
+  }
+
+  next();
+}
+
+module.exports = { authRequired, adminOnly, sensorApiKeyRequired, JWT_SECRET };
 
