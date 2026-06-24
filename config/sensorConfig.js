@@ -8,6 +8,7 @@ module.exports = {
   temperatureThresholdUp: Number(process.env.TEMPERATURE_THRESHOLD_UP) || 0,
   motionZeroToleranceCount: Number(process.env.SENSOR_MOTION_ZERO_TOLERANCE_COUNT) || 3,
   sensorId: process.env.SENSOR_ID || 'DHT11_01',
+  cage: Number(process.env.SENSOR_CAGE) || 1,
   isControllerConnected: process.env.IS_CONTROLLER_CONNECTED || false,
 };
 

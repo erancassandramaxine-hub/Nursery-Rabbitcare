@@ -1,6 +1,7 @@
 const authRouter = require('./auth');
 const metricsRouter = require('./metrics');
 const dataRouter = require('./data');
+const weightRouter = require('./weight');
 const { authRequired, adminOnly } = require('../middleware/auth');
 
 function registerRoutes(app) {
@@ -14,6 +15,7 @@ function registerRoutes(app) {
 
   // Sensor data ingest
   app.use('/api/data', dataRouter);
+  app.use('/api/data/weight', weightRouter);
 
   // Protected API routes (admin-only)
   app.use('/api/metrics', authRequired, adminOnly, metricsRouter);

@@ -2,33 +2,21 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 require('dotenv').config();
 
-// Define a Time-Series Schema
 const sensorSchema = new mongoose.Schema({
-  timestamp: { type: Date, default: Date.now },
-  metadata: { sensorId: String, location: String },
-  humidity: Number,
-  temperature: Number
-}, { 
-  timeseries: { 
-    timeField: 'timestamp', 
-    metaField: 'metadata', 
-    granularity: 'seconds' 
-  } 
+  cage:        { type: Number, required: true },
+  temperature: { type: Number, required: true },
+  humidity:    { type: Number, required: true },
+  samples:     { type: Number },
+  timestamp:   { type: Date, default: Date.now },
 });
 
 const SensorData = mongoose.model('SensorData', sensorSchema);
 
 const weightMotionSchema = new mongoose.Schema({
+  cage:      { type: Number, required: true },
+  weight:    { type: Number, required: true },
+  motion:    { type: Number },
   timestamp: { type: Date, default: Date.now },
-  metadata: { sensorId: String },
-  weight: Number,
-  motion: Number,
-}, {
-  timeseries: {
-    timeField: 'timestamp',
-    metaField: 'metadata',
-    granularity: 'seconds',
-  },
 });
 
 const WeightMotionData = mongoose.model('WeightMotionData', weightMotionSchema);

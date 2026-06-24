@@ -62,9 +62,10 @@ function initSensorListener(SensorData, WeightMotionData, options = {}) {
 
     try {
       await new SensorData({
+        cage: sensorConfig.cage,
         humidity: parseFloat(avgH),
         temperature: parseFloat(avgT),
-        metadata: { sensorId: latestSensor, samples: dataBuffer.length },
+        samples: dataBuffer.length,
       }).save();
 
       console.log(`[DB] Saved 5-min average: ${avgT}°C`);
@@ -123,9 +124,9 @@ function initSensorListener(SensorData, WeightMotionData, options = {}) {
         : sensorConfig.sensorId;
 
       await new WeightMotionData({
+        cage: sensorConfig.cage,
         weight,
         motion,
-        metadata: { sensorId: latestSensor },
       }).save();
 
       lastConditionalSaveTime = now;
