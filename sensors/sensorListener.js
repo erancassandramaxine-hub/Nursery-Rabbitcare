@@ -13,7 +13,6 @@ function initSensorListener(SensorData, WeightMotionData, options = {}) {
     saveIntervalMs = sensorConfig.saveIntervalMs,
     conditionalSaveIntervalMs = sensorConfig.conditionalSaveIntervalMs,
     weightThresholdGrams = sensorConfig.weightThresholdGrams,
-    motionZeroToleranceCount = sensorConfig.motionZeroToleranceCount,
   } = options;
 
   const arduinoSerial = new SerialPort({ path: port, baudRate });
@@ -26,7 +25,6 @@ function initSensorListener(SensorData, WeightMotionData, options = {}) {
   let dataBuffer = [];
   let lastSaveTime = Date.now();
   let lastConditionalSaveTime = null;
-  let consecutiveZeroMotionCount = 0;
 
   parser.on('data', (rawData) => {
     let parseData;
@@ -37,9 +35,9 @@ function initSensorListener(SensorData, WeightMotionData, options = {}) {
       return;
     }
 
-    const { h, t, w, m, sensor } = parseData;
+    const { h, t, w, sensor } = parseData;
 
-    handleConditionalWeightMotionSave({ w, m, sensor });
+    handleConditionalWeightSave({ w, sensor });
 
     if (!isNaN(h) && !isNaN(t)) {
       dataBuffer.push({ h, t, sensor });
@@ -76,63 +74,35 @@ function initSensorListener(SensorData, WeightMotionData, options = {}) {
     }
   }
 
-  async function handleConditionalWeightMotionSave({ w, m, sensor }) {
+  async function handleConditionalWeightSave({ w, sensor }) {
     if (!WeightMotionData) return;
 
     const weight = Number(w);
-    const motion = Number(m);
     const now = Date.now();
-    const isWeightPassed = !Number.isNaN(weight) && weight >= weightThresholdGrams;
-    const isMotionValid = !Number.isNaN(motion) && (motion === 0 || motion === 1);
 
-    if (!isWeightPassed || !isMotionValid) {
+    if (Number.isNaN(weight) || weight < weightThresholdGrams) {
       lastConditionalSaveTime = null;
-      consecutiveZeroMotionCount = 0;
       return;
     }
 
     if (lastConditionalSaveTime === null) {
-      if (motion !== 1) return;
-
       lastConditionalSaveTime = now;
-      consecutiveZeroMotionCount = 0;
-      console.log(
-        `[DB] Condition met, starting weight/motion save cycle (every ${conditionalSaveIntervalMs}ms): ${weight}g, motion=${motion}`
-      );
+      console.log(`[DB] Weight threshold met, starting save cycle (every ${conditionalSaveIntervalMs}ms): ${weight}g`);
       return;
-    }
-
-    if (motion === 1) {
-      consecutiveZeroMotionCount = 0;
-    } else {
-      consecutiveZeroMotionCount += 1;
-      if (consecutiveZeroMotionCount > motionZeroToleranceCount) {
-        console.log(
-          `[DB] Stopping weight/motion save cycle: motion stayed 0 beyond tolerance (${motionZeroToleranceCount})`
-        );
-        lastConditionalSaveTime = null;
-        consecutiveZeroMotionCount = 0;
-        return;
-      }
     }
 
     if (now - lastConditionalSaveTime < conditionalSaveIntervalMs) return;
 
     try {
-      const latestSensor = (typeof sensor === 'string' && sensor.trim())
-        ? sensor
-        : sensorConfig.sensorId;
-
       await new WeightMotionData({
         cage: sensorConfig.cage,
         weight,
-        motion,
       }).save();
 
       lastConditionalSaveTime = now;
-      console.log(`[DB] Saved weight/motion snapshot: ${weight}g, motion=${motion}`);
+      console.log(`[DB] Saved weight snapshot: ${weight}g`);
     } catch (e) {
-      console.error('Failed to save weight/motion snapshot:', e);
+      console.error('Failed to save weight snapshot:', e);
     }
   }
 

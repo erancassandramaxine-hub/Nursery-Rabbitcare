@@ -27,6 +27,13 @@ function adminOnly(req, res, next) {
   next();
 }
 
+function userOnly(req, res, next) {
+  if (!req.user || req.user.role !== 'user') {
+    return res.status(403).json({ error: 'User access required' });
+  }
+  next();
+}
+
 function sensorApiKeyRequired(req, res, next) {
   if (!SENSOR_API_KEY) {
     console.warn('SENSOR_API_KEY is not set; sensor endpoint is unprotected');
@@ -41,5 +48,5 @@ function sensorApiKeyRequired(req, res, next) {
   next();
 }
 
-module.exports = { authRequired, adminOnly, sensorApiKeyRequired, JWT_SECRET };
+module.exports = { authRequired, adminOnly, userOnly, sensorApiKeyRequired, JWT_SECRET };
 

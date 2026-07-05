@@ -1,5 +1,5 @@
 const express = require('express');
-const { SensorData, WeightMotionData } = require('../database');
+const { SensorData, WeightMotionData, ThresholdSettings } = require('../database');
 const sensorConfig = require('../config/sensorConfig');
 
 const router = express.Router();
@@ -77,11 +77,10 @@ router.get('/temperature-humidity', async (req, res) => {
 
       return {
         id: doc._id,
+        cage: doc.cage,
         humidity: doc.humidity,
         temperature: doc.temperature,
-        // Keep ISO for precise frontend parsing/sorting
         timestamp: ts ? ts.toISOString() : null,
-        // Human-readable label for chart display
         timestampLabel: ts
           ? ts.toLocaleString('en-US', {
               year: 'numeric',
@@ -100,7 +99,7 @@ router.get('/temperature-humidity', async (req, res) => {
       return res.json(formatted);
     }
 
-    // Bucket readings by selected interval and average values per bucket.
+    // Bucket readings by cage + interval so cage1 and cage2 are never averaged together.
     const buckets = new Map();
     for (const row of formatted) {
       if (!row.timestamp) continue;
@@ -109,10 +108,11 @@ router.get('/temperature-humidity', async (req, res) => {
       if (Number.isNaN(ts)) continue;
 
       const bucketStartMs = Math.floor(ts / intervalMs) * intervalMs;
-      const key = String(bucketStartMs);
+      const key = `${row.cage}-${bucketStartMs}`;
 
       if (!buckets.has(key)) {
         buckets.set(key, {
+          cage: row.cage,
           timestampMs: bucketStartMs,
           humiditySum: 0,
           humidityCount: 0,
@@ -135,12 +135,13 @@ router.get('/temperature-humidity', async (req, res) => {
     }
 
     const aggregated = Array.from(buckets.values())
-      .sort((a, b) => a.timestampMs - b.timestampMs)
+      .sort((a, b) => a.cage - b.cage || a.timestampMs - b.timestampMs)
       .map((bucket) => {
         const ts = new Date(bucket.timestampMs);
 
         return {
-          id: String(bucket.timestampMs),
+          id: `${bucket.cage}-${bucket.timestampMs}`,
+          cage: bucket.cage,
           humidity: bucket.humidityCount ? bucket.humiditySum / bucket.humidityCount : null,
           temperature: bucket.temperatureCount ? bucket.temperatureSum / bucket.temperatureCount : null,
           timestamp: ts.toISOString(),
@@ -164,15 +165,15 @@ router.get('/temperature-humidity', async (req, res) => {
   }
 });
 
-// GET /api/metrics/weight-motion
-// Fetch weight & motion data for charts
+// GET /api/metrics/weight
+// Fetch weight data for charts
 // Default: last 24 hours
 // Optional query params:
 //   limit: max number of records (default 100, max 1000)
 //   from: Unix timestamp (seconds/ms) for start timestamp (inclusive)
 //   to: Unix timestamp (seconds/ms) for end timestamp (inclusive)
 //   interval: bucket size for aggregated chart data (1m | 5m | 30m | 1h)
-router.get('/weight-motion', async (req, res) => {
+router.get('/weight', async (req, res) => {
   try {
     const { limit = 100, from, to, interval } = req.query;
     const intervalMs = interval ? validIntervals[String(interval)] : null;
@@ -214,7 +215,6 @@ router.get('/weight-motion', async (req, res) => {
       return {
         id: doc._id,
         weight: doc.weight,
-        motion: doc.motion,
         timestamp: ts ? ts.toISOString() : null,
         timestampLabel: ts
           ? ts.toLocaleString('en-US', {
@@ -250,8 +250,6 @@ router.get('/weight-motion', async (req, res) => {
           timestampMs: bucketStartMs,
           weightSum: 0,
           weightCount: 0,
-          motionSum: 0,
-          motionCount: 0,
         });
       }
 
@@ -260,11 +258,6 @@ router.get('/weight-motion', async (req, res) => {
       if (typeof row.weight === 'number') {
         bucket.weightSum += row.weight;
         bucket.weightCount += 1;
-      }
-
-      if (typeof row.motion === 'number') {
-        bucket.motionSum += row.motion;
-        bucket.motionCount += 1;
       }
     }
 
@@ -276,7 +269,6 @@ router.get('/weight-motion', async (req, res) => {
         return {
           id: String(bucket.timestampMs),
           weight: bucket.weightCount ? bucket.weightSum / bucket.weightCount : null,
-          motion: bucket.motionCount ? bucket.motionSum / bucket.motionCount : null,
           timestamp: ts.toISOString(),
           timestampLabel: ts.toLocaleString('en-US', {
             year: 'numeric',
@@ -293,23 +285,63 @@ router.get('/weight-motion', async (req, res) => {
 
     return res.json(aggregated);
   } catch (err) {
-    console.error('Error fetching weight/motion data:', err);
-    res.status(500).json({ error: 'Failed to fetch weight/motion data' });
+    console.error('Error fetching weight data:', err);
+    res.status(500).json({ error: 'Failed to fetch weight data' });
   }
 });
 
 // GET /api/metrics/thresholds
-// Returns thresholds from env-backed sensor config.
+// Returns current thresholds. DB values take precedence over env defaults.
 router.get('/thresholds', async (req, res) => {
   try {
+    const saved = await ThresholdSettings.findOne();
     return res.json({
-      weightThresholdGrams: sensorConfig.weightThresholdGrams,
-      temperatureThresholdDown: sensorConfig.temperatureThresholdDown,
-      temperatureThresholdUp: sensorConfig.temperatureThresholdUp,
+      temperatureThresholdDown: saved?.temperatureThresholdDown ?? sensorConfig.temperatureThresholdDown,
+      temperatureThresholdUp:   saved?.temperatureThresholdUp   ?? sensorConfig.temperatureThresholdUp,
+      weightThresholdGrams:     saved?.weightThresholdGrams     ?? sensorConfig.weightThresholdGrams,
+      updatedAt: saved?.updatedAt ?? null,
     });
   } catch (err) {
     console.error('Error fetching thresholds:', err);
     return res.status(500).json({ error: 'Failed to fetch thresholds' });
+  }
+});
+
+// PUT /api/metrics/thresholds
+// Admin sets temperature (low/high) and weight-ignore thresholds. Persisted to DB.
+// Body: { temperatureThresholdDown: number, temperatureThresholdUp: number, weightThresholdGrams: number }
+router.put('/thresholds', async (req, res) => {
+  try {
+    const { temperatureThresholdDown, temperatureThresholdUp, weightThresholdGrams } = req.body;
+
+    const errors = [];
+    if (typeof temperatureThresholdDown !== 'number') errors.push('"temperatureThresholdDown" must be a number');
+    if (typeof temperatureThresholdUp !== 'number')   errors.push('"temperatureThresholdUp" must be a number');
+    if (typeof weightThresholdGrams !== 'number')     errors.push('"weightThresholdGrams" must be a number');
+    if (errors.length) return res.status(400).json({ error: errors.join('; ') });
+
+    if (weightThresholdGrams < 0) {
+      return res.status(400).json({ error: '"weightThresholdGrams" must be >= 0' });
+    }
+    if (temperatureThresholdDown >= temperatureThresholdUp) {
+      return res.status(400).json({ error: '"temperatureThresholdDown" must be less than "temperatureThresholdUp"' });
+    }
+
+    const updated = await ThresholdSettings.findOneAndUpdate(
+      {},
+      { temperatureThresholdDown, temperatureThresholdUp, weightThresholdGrams, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+
+    return res.json({
+      temperatureThresholdDown: updated.temperatureThresholdDown,
+      temperatureThresholdUp:   updated.temperatureThresholdUp,
+      weightThresholdGrams:     updated.weightThresholdGrams,
+      updatedAt: updated.updatedAt,
+    });
+  } catch (err) {
+    console.error('Error saving thresholds:', err);
+    return res.status(500).json({ error: 'Failed to save thresholds' });
   }
 });
 
