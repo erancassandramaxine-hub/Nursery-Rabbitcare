@@ -5,6 +5,7 @@ const weightRouter = require('./weight');
 const latestRouter = require('./latest');
 const usersRouter = require('./users');
 const analysisRouter = require('./analysis');
+const controlRouter = require('./control');
 const { authRequired, adminOnly } = require('../middleware/auth');
 
 function registerRoutes(app) {
@@ -29,6 +30,9 @@ function registerRoutes(app) {
 
   // Analysis — accessible by any authenticated user (admin or user role)
   app.use('/api/analysis', authRequired, analysisRouter);
+
+  // Control status — POST uses sensor API key (arduino), GET uses JWT (admin or user)
+  app.use('/api/control', controlRouter);
 }
 
 module.exports = registerRoutes;

@@ -78,8 +78,8 @@ router.get('/temperature-humidity', async (req, res) => {
       return {
         id: doc._id,
         cage: doc.cage,
-        humidity: doc.humidity,
-        temperature: doc.temperature,
+        humidity: Math.round(doc.humidity * 100) / 100,
+        temperature: Math.round(doc.temperature * 100) / 100,
         timestamp: ts ? ts.toISOString() : null,
         timestampLabel: ts
           ? ts.toLocaleString('en-US', {
@@ -142,8 +142,8 @@ router.get('/temperature-humidity', async (req, res) => {
         return {
           id: `${bucket.cage}-${bucket.timestampMs}`,
           cage: bucket.cage,
-          humidity: bucket.humidityCount ? bucket.humiditySum / bucket.humidityCount : null,
-          temperature: bucket.temperatureCount ? bucket.temperatureSum / bucket.temperatureCount : null,
+          humidity: bucket.humidityCount ? Math.round((bucket.humiditySum / bucket.humidityCount) * 100) / 100 : null,
+          temperature: bucket.temperatureCount ? Math.round((bucket.temperatureSum / bucket.temperatureCount) * 100) / 100 : null,
           timestamp: ts.toISOString(),
           timestampLabel: ts.toLocaleString('en-US', {
             year: 'numeric',
