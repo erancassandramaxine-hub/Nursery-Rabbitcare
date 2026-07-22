@@ -55,6 +55,9 @@ const userSchema = new mongoose.Schema({
   name: { type: String, default: '' },
   role: { type: String, default: 'user' },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+  mustResetPassword: { type: Boolean, default: true },
+  resetCode: { type: String, default: null },
+  resetCodeExpiry: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
 });
 

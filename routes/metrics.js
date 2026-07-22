@@ -1,6 +1,7 @@
 const express = require('express');
 const { SensorData, WeightMotionData, ThresholdSettings } = require('../database');
 const sensorConfig = require('../config/sensorConfig');
+const { adminOnly } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -310,7 +311,7 @@ router.get('/thresholds', async (req, res) => {
 // PUT /api/metrics/thresholds
 // Admin sets temperature (low/high) and weight-ignore thresholds. Persisted to DB.
 // Body: { temperatureThresholdDown: number, temperatureThresholdUp: number, weightThresholdGrams: number }
-router.put('/thresholds', async (req, res) => {
+router.put('/thresholds', adminOnly, async (req, res) => {
   try {
     const { temperatureThresholdDown, temperatureThresholdUp, weightThresholdGrams } = req.body;
 

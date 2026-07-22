@@ -24,9 +24,9 @@ function registerRoutes(app) {
   // Latest readings — accessible by any authenticated user (admin or user role)
   app.use('/api/latest', authRequired, latestRouter);
 
-  // Protected API routes (admin-only)
-  app.use('/api/metrics', authRequired, adminOnly, metricsRouter);
-  app.use('/api/users', authRequired, adminOnly, usersRouter);
+  // Protected API routes (admin-only for most; thresholds GET is open to all users)
+  app.use('/api/metrics', authRequired, metricsRouter);
+  app.use('/api/users', authRequired, usersRouter);
 
   // Analysis — accessible by any authenticated user (admin or user role)
   app.use('/api/analysis', authRequired, analysisRouter);

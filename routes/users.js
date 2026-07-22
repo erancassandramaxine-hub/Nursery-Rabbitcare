@@ -1,6 +1,9 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { User } = require('../database');
+const { sendTemporaryPassword } = require('../middleware/mailer');
+const { adminOnly } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -42,18 +45,28 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/users
-router.post('/', async (req, res) => {
-  const { email, password, name } = req.body;
+router.post('/', adminOnly, async (req, res) => {
+  const { email, name, role, status } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
   }
 
   try {
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.create({ email, passwordHash, name: name || '' });
+    const tempPassword = crypto.randomBytes(6).toString('hex');
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    const user = await User.create({ email, passwordHash, name: name || '', role: role || 'user', status: status || 'active' });
     const { passwordHash: _, ...safe } = user.toObject();
-    res.status(201).json(safe);
+
+    let emailSent = true;
+    try {
+      await sendTemporaryPassword(email, name, tempPassword);
+    } catch (emailErr) {
+      emailSent = false;
+      console.error('Email send failed:', emailErr.message);
+    }
+
+    res.status(201).json({ ...safe, emailSent });
   } catch (err) {
     if (err.code === 11000) {
       return res.status(409).json({ error: 'Email already in use' });
@@ -63,7 +76,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/users/:id
-router.put('/:id', async (req, res) => {
+router.put('/:id', adminOnly, async (req, res) => {
   const { email, password, name, status } = req.body;
   const updates = {};
 
@@ -98,7 +111,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/users/:id
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', adminOnly, async (req, res) => {
   try {
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });

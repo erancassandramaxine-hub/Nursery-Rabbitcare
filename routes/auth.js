@@ -1,12 +1,15 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { AdminUser, User } = require('../database');
-const { JWT_SECRET } = require('../middleware/auth');
+const { JWT_SECRET, authRequired } = require('../middleware/auth');
+const { sendResetCode } = require('../middleware/mailer');
 
 const router = express.Router();
 
 // POST /api/auth/login
+// Checks AdminUser first, then User. Role-specific conditions applied per collection.
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -15,64 +18,144 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const user = await AdminUser.findOne({ email });
-    if (!user) {
+    let account = await AdminUser.findOne({ email });
+    let role = 'admin';
+
+    if (!account) {
+      account = await User.findOne({ email });
+      role = 'user';
+    }
+
+    if (!account) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    if (role === 'user' && account.status === 'inactive') {
+      return res.status(403).json({ error: 'Account is inactive' });
+    }
+
+    const isMatch = await bcrypt.compare(password, account.passwordHash);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const token = jwt.sign(
-      { id: user._id, email: user.email, role: user.role },
+      { id: account._id, email: account.email, role },
       JWT_SECRET,
       { expiresIn: '12h' }
     );
 
-    res.json({ token });
+    res.json({
+      token,
+      role,
+      ...(role === 'user' && { mustResetPassword: account.mustResetPassword }),
+    });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
   }
 });
 
-// POST /api/auth/user/login
-router.post('/user/login', async (req, res) => {
-  const { email, password } = req.body;
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
   }
 
   try {
     const user = await User.findOne({ email });
+
+    // Always respond the same way to avoid exposing which emails are registered
     if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.json({ message: 'If that email exists, a reset code has been sent' });
     }
 
-    if (user.status === 'inactive') {
-      return res.status(403).json({ error: 'Account is inactive' });
-    }
+    const code = crypto.randomInt(100000, 999999).toString();
+    const expiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    user.resetCode = code;
+    user.resetCodeExpiry = expiry;
+    await user.save();
 
-    const token = jwt.sign(
-      { id: user._id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '12h' }
-    );
+    await sendResetCode(email, user.name, code);
 
-    res.json({ token });
+    res.json({ message: 'If that email exists, a reset code has been sent' });
   } catch (err) {
-    console.error('User login error:', err);
-    res.status(500).json({ error: 'Login failed' });
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: 'Failed to send reset code' });
+  }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ error: 'email, code, and newPassword are required' });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user || !user.resetCode || !user.resetCodeExpiry) {
+      return res.status(400).json({ error: 'Invalid or expired reset code' });
+    }
+
+    if (user.resetCodeExpiry < new Date()) {
+      return res.status(400).json({ error: 'Reset code has expired' });
+    }
+
+    if (user.resetCode !== code) {
+      return res.status(400).json({ error: 'Invalid or expired reset code' });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.mustResetPassword = false;
+    user.resetCode = null;
+    user.resetCodeExpiry = null;
+    await user.save();
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+// POST /api/auth/change-password
+router.post('/change-password', authRequired, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+  }
+
+  if (currentPassword === newPassword) {
+    return res.status(400).json({ error: 'New password must differ from current password' });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.mustResetPassword = false;
+    await user.save();
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Failed to change password' });
   }
 });
 
 module.exports = router;
-
