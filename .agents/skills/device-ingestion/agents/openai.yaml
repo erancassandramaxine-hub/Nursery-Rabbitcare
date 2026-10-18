@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Device Ingestion"
+  short_description: "Sensor, weight, control, and serial input"
+  default_prompt: "Use $device-ingestion to change how device readings enter this backend."

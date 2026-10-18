@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Backend Runtime"
+  short_description: "Startup, MongoDB, environment, and Docker"
+  default_prompt: "Use $backend-runtime to change backend startup or deployment configuration."

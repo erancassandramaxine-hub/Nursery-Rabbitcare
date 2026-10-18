@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Metrics & Analysis"
+  short_description: "Charts, thresholds, and maternal activity"
+  default_prompt: "Use $metrics-analysis to update reading summaries or analysis in this backend."

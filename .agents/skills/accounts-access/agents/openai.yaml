@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Accounts & Access"
+  short_description: "Login, users, roles, and password reset"
+  default_prompt: "Use $accounts-access to update an account or authorization flow in this backend."
